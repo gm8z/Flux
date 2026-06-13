@@ -564,6 +564,53 @@ function FluxLib:CreateWindow(opts)
 		return Obj
 	end
 
+	-- Text input. Mirrors the config-name input styling: element card with a
+	-- labelled left side and an inset focus-highlighted box on the right.
+	-- callback(text) fires on focus lost (when the user finishes typing).
+	-- Returns SetValue / GetValue / Frame.
+	local function _Textbox(cont, name, placeholder, cb)
+		local Row=Instance.new("Frame") Row.Size=UDim2.new(1,0,0,ButtonHeight)
+		Row.BackgroundColor3=C.Elem Row.BorderSizePixel=0 Row.LayoutOrder=2 Row.Parent=cont
+		MakeCorner(Row,10)
+
+		local Lbl=Instance.new("TextLabel") Lbl.BackgroundTransparency=1
+		Lbl.Position=UDim2.new(0,14,0,0) Lbl.Size=UDim2.new(0,90,1,0) Lbl.Text=name
+		Lbl.TextColor3=C.Text Lbl.Font=Enum.Font.GothamMedium Lbl.TextSize=IsMobile and 15 or 14
+		Lbl.TextXAlignment=Enum.TextXAlignment.Left Lbl.Parent=Row
+
+		local Box=Instance.new("Frame") Box.BackgroundColor3=C.InputBG Box.BorderSizePixel=0
+		Box.Position=UDim2.new(0,100,0.5,-14) Box.Size=UDim2.new(1,-114,0,28) Box.Parent=Row
+		MakeCorner(Box,8)
+		local Stroke=MakeStroke(Box,C.Accent,1,1)
+
+		local Icon=Instance.new("ImageLabel") Icon.BackgroundTransparency=1
+		Icon.Position=UDim2.new(0,8,0.5,-8) Icon.Size=UDim2.new(0,16,0,16)
+		Icon.Image="rbxassetid://6026568063" Icon.ImageColor3=Color3.fromRGB(110,110,130) Icon.Parent=Box
+
+		local Input=Instance.new("TextBox") Input.BackgroundTransparency=1 Input.BorderSizePixel=0
+		Input.Position=UDim2.new(0,30,0,0) Input.Size=UDim2.new(1,-38,1,0)
+		Input.Font=Enum.Font.Gotham Input.TextSize=13 Input.TextColor3=Color3.fromRGB(220,220,220)
+		Input.PlaceholderText=placeholder or "Type here..." Input.PlaceholderColor3=Color3.fromRGB(80,80,95)
+		Input.Text="" Input.ClearTextOnFocus=false Input.TextXAlignment=Enum.TextXAlignment.Left
+		pcall(function() Input.SelectionImageObject=Instance.new("Frame") end) Input.Parent=Box
+
+		Input.Focused:Connect(function()
+			TweenService:Create(Stroke,TweenInfo.new(0.15),{Transparency=0.4}):Play()
+			TweenService:Create(Icon,TweenInfo.new(0.15),{ImageColor3=C.Accent}):Play()
+		end)
+		Input.FocusLost:Connect(function()
+			TweenService:Create(Stroke,TweenInfo.new(0.15),{Transparency=1}):Play()
+			TweenService:Create(Icon,TweenInfo.new(0.15),{ImageColor3=Color3.fromRGB(110,110,130)}):Play()
+			if cb then task.spawn(function() pcall(cb, Input.Text) end) end
+		end)
+
+		local Obj={}
+		Obj.Frame    = Row
+		Obj.GetValue = function() return Input.Text end
+		Obj.SetValue = function(v) Input.Text=tostring(v or "") end
+		return Obj
+	end
+
 	-- icon (optional, 5th arg) renders a small image left of the title and
 	-- shifts the title over to make room. Fully backwards compatible.
 	local function _Toggle(cont, name, default, cb, icon)
@@ -1090,6 +1137,7 @@ function FluxLib:CreateWindow(opts)
 		function Sec:CreateDropdown(n,opts,cb)     return _Dropdown(container,n,opts,cb)    end
 		function Sec:CreatePlayerDropdown(n,cb)    return _PlayerDropdown(container,n,cb)   end
 		function Sec:CreateLabel(text)             return _Label(container,text)            end
+		function Sec:CreateTextbox(n,ph,cb)        return _Textbox(container,n,ph,cb)       end
 		return Sec
 	end
 
