@@ -130,6 +130,10 @@ function FluxLib:CreateWindow(opts)
 	-- the centre. Declared here, connected once ShadowHolder exists below.
 	local ClampWindowOnScreen
 
+	-- Snap behaviour (shared by the drag release and the resize handler)
+	local SNAP_MARGIN    = 12   -- gap left between window and screen edge
+	local SNAP_THRESHOLD = 40   -- only snap when the edge is within this many px
+
 	-- ── Shadow / main containers ─────────────────────────────────────────────
 	local ShadowHolder = Instance.new("Frame")
 	ShadowHolder.AnchorPoint          = Vector2.new(0.5, 0.5)
@@ -145,18 +149,30 @@ function FluxLib:CreateWindow(opts)
 	AspectLock.DominantAxis = Enum.DominantAxis.Width
 	AspectLock.Parent       = ShadowHolder
 
-	-- Now that ShadowHolder exists, wire the off-screen recovery. If the
-	-- window's centre has drifted outside the viewport after a resize, snap
-	-- it back to the middle so it's never lost.
+	-- Now that ShadowHolder exists, wire the off-screen recovery. After a
+	-- resize, re-clamp the window fully on-screen and, if it was resting
+	-- against an edge, keep it glued to that edge so it tracks the new size.
 	ClampWindowOnScreen = function()
-		local vp  = workspace.CurrentCamera.ViewportSize
-		local pos = ShadowHolder.AbsolutePosition
-		local sz  = ShadowHolder.AbsoluteSize
-		local cx  = pos.X + sz.X/2
-		local cy  = pos.Y + sz.Y/2
-		if cx < 0 or cy < 0 or cx > vp.X or cy > vp.Y then
-			ShadowHolder.Position = UDim2.new(0.5,0,0.5,0)
-		end
+		local vp   = workspace.CurrentCamera.ViewportSize
+		local sz   = ShadowHolder.AbsoluteSize
+		local half = sz/2
+		local cx   = ShadowHolder.AbsolutePosition.X + half.X
+		local cy   = ShadowHolder.AbsolutePosition.Y + half.Y
+
+		-- Was it sitting at an edge (within margin+a little)? If so, re-pin it.
+		local edge = SNAP_MARGIN + 4
+		if cx - half.X <= edge then            cx = half.X + SNAP_MARGIN
+		elseif vp.X - (cx + half.X) <= edge then cx = vp.X - half.X - SNAP_MARGIN end
+		if cy - half.Y <= edge then            cy = half.Y + SNAP_MARGIN
+		elseif vp.Y - (cy + half.Y) <= edge then cy = vp.Y - half.Y - SNAP_MARGIN end
+
+		-- Final on-screen clamp
+		local minX, maxX = half.X, vp.X - half.X
+		local minY, maxY = half.Y, vp.Y - half.Y
+		cx = (minX <= maxX) and math.clamp(cx, minX, maxX) or vp.X/2
+		cy = (minY <= maxY) and math.clamp(cy, minY, maxY) or vp.Y/2
+
+		ShadowHolder.Position = UDim2.new(0, cx, 0, cy)
 	end
 	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 		task.defer(ClampWindowOnScreen)
@@ -1412,8 +1428,7 @@ function FluxLib:CreateWindow(opts)
 	local TargetPosition=ShadowHolder.Position
 	local dMC,dEC,dRC
 
-	local SNAP_MARGIN    = 12   -- gap left between window and screen edge
-	local SNAP_THRESHOLD = 40   -- only snap when the edge is within this many px
+	-- (SNAP_MARGIN / SNAP_THRESHOLD declared earlier, shared with resize handler)
 
 	-- Clamp an offset-based position so the window stays fully on screen.
 	-- Works in absolute pixels, so it's correct on any resolution incl. stretched.
@@ -1449,20 +1464,33 @@ function FluxLib:CreateWindow(opts)
 		local distBottom = vp.Y - (cy + half.Y)
 
 		local snapX, snapY = cx, cy
+		local didSnap = false
 		-- Horizontal snap
 		if distLeft <= SNAP_THRESHOLD and distLeft <= distRight then
 			snapX = half.X + SNAP_MARGIN
+			didSnap = true
 		elseif distRight <= SNAP_THRESHOLD then
 			snapX = vp.X - half.X - SNAP_MARGIN
+			didSnap = true
 		end
 		-- Vertical snap
 		if distTop <= SNAP_THRESHOLD and distTop <= distBottom then
 			snapY = half.Y + SNAP_MARGIN
+			didSnap = true
 		elseif distBottom <= SNAP_THRESHOLD then
 			snapY = vp.Y - half.Y - SNAP_MARGIN
+			didSnap = true
 		end
 
-		-- Final safety clamp, then smooth tween into place
+		if not didSnap then
+			-- Not near any edge: leave it exactly where it was dropped.
+			-- Pin the current pixel position so nothing re-animates it.
+			TargetPosition = UDim2.new(0, cx, 0, cy)
+			ShadowHolder.Position = TargetPosition
+			return
+		end
+
+		-- An edge was close — smooth tween flush against it
 		snapX, snapY = clampToScreen(snapX, snapY)
 		local goal = UDim2.new(0, snapX, 0, snapY)
 		TweenService:Create(ShadowHolder,
