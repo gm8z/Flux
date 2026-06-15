@@ -244,6 +244,7 @@ function FluxLib:CreateWindow(opts)
 	SidebarScroll.Size              = UDim2.new(1,0,1,-110)
 	SidebarScroll.ScrollBarThickness= 0
 	SidebarScroll.CanvasSize        = UDim2.new(0,0,0,0)
+	SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	SidebarScroll.ScrollingEnabled  = true
 	SidebarScroll.Parent            = Sidebar
 
@@ -259,7 +260,7 @@ function FluxLib:CreateWindow(opts)
 	SidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	SidebarLayout.Parent              = SidebarScroll
 	SidebarLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		SidebarScroll.CanvasSize=UDim2.new(0,0,0,SidebarLayout.AbsoluteContentSize.Y+10)
+		SidebarScroll.CanvasSize=UDim2.new(0,0,0,SidebarLayout.AbsoluteContentSize.Y+16)
 	end)
 
 	-- settings gear at bottom of sidebar
@@ -1183,12 +1184,14 @@ function FluxLib:CreateWindow(opts)
 	local SettingsPage=Instance.new("ScrollingFrame")
 	SettingsPage.BackgroundTransparency=1 SettingsPage.Size=UDim2.new(1,0,1,0)
 	SettingsPage.CanvasSize=UDim2.new(0,0,0,0) SettingsPage.ScrollBarThickness=IsMobile and 0 or 2
+	SettingsPage.AutomaticCanvasSize=Enum.AutomaticSize.Y
 	SettingsPage.ScrollBarImageColor3=C.Accent SettingsPage.Visible=false
 	SettingsPage.BorderSizePixel=0 SettingsPage.Parent=PagesFolder
+	local SettPad=Instance.new("UIPadding") SettPad.PaddingBottom=UDim.new(0,16) SettPad.Parent=SettingsPage
 	local SPL=Instance.new("UIListLayout") SPL.Padding=UDim.new(0,14)
 	SPL.SortOrder=Enum.SortOrder.LayoutOrder SPL.Parent=SettingsPage
 	SPL:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-		SettingsPage.CanvasSize=UDim2.new(0,0,0,SPL.AbsoluteContentSize.Y+20)
+		SettingsPage.CanvasSize=UDim2.new(0,0,0,SPL.AbsoluteContentSize.Y+30)
 	end)
 
 	local SettingsTabData={Button=SettingsButton,Background=nil,Accent=nil,Icon=SettingsIcon,Page=SettingsPage}
@@ -1410,7 +1413,7 @@ function FluxLib:CreateWindow(opts)
 	local dMC,dEC,dRC
 
 	local SNAP_MARGIN    = 12   -- gap left between window and screen edge
-	local SNAP_THRESHOLD = 90   -- how close (px) an edge must be to snap to it
+	local SNAP_THRESHOLD = 40   -- only snap when the edge is within this many px
 
 	-- Clamp an offset-based position so the window stays fully on screen.
 	-- Works in absolute pixels, so it's correct on any resolution incl. stretched.
@@ -1536,11 +1539,16 @@ function FluxLib:CreateWindow(opts)
 
 		local Page=Instance.new("ScrollingFrame") Page.BackgroundTransparency=1
 		Page.Size=UDim2.new(1,0,1,0) Page.CanvasSize=UDim2.new(0,0,0,0)
+		Page.AutomaticCanvasSize=Enum.AutomaticSize.Y
 		Page.ScrollBarThickness=IsMobile and 0 or 2 Page.ScrollBarImageColor3=C.Accent
 		Page.Visible=false Page.BorderSizePixel=0 Page.Parent=PagesFolder
+		local PPad=Instance.new("UIPadding") PPad.PaddingBottom=UDim.new(0,16) PPad.Parent=Page
 		local PL=Instance.new("UIListLayout") PL.Padding=UDim.new(0,14) PL.Parent=Page
 		PL:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-			Page.CanvasSize=UDim2.new(0,0,0,PL.AbsoluteContentSize.Y+10)
+			-- AutomaticCanvasSize handles height; this is a fallback for any
+			-- client build that ignores it. Extra bottom room so the last
+			-- element is never clipped.
+			Page.CanvasSize=UDim2.new(0,0,0,PL.AbsoluteContentSize.Y+30)
 		end)
 
 		local td={Button=Tab, Background=BG, Accent=Acc, Icon=Icon, Page=Page}
