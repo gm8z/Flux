@@ -109,12 +109,26 @@ function FluxLib:CreateWindow(opts)
 	pcall(function() ScreenGui.IgnoreGuiInset = true end)
 	ScreenGui.Parent = PlayerGui
 
-	-- auto scale
-	local VP    = workspace.CurrentCamera.ViewportSize
-	local Scale = math.clamp(math.min(VP.X/1920, VP.Y/1080), 0.72, 1)
+	-- auto scale — recomputed live so it adapts to window resize, fullscreen
+	-- toggles, device rotation, and stretched resolutions instead of being
+	-- locked to whatever the viewport was at launch.
 	local UIScale = Instance.new("UIScale")
-	UIScale.Scale  = Scale
 	UIScale.Parent = ScreenGui
+
+	local function updateScale()
+		local vp = workspace.CurrentCamera.ViewportSize
+		-- Scale to the smaller axis ratio so the window always fits, with a
+		-- floor so it never gets unusably tiny on small phones.
+		local s = math.clamp(math.min(vp.X/1920, vp.Y/1080), 0.55, 1)
+		UIScale.Scale = s
+	end
+	updateScale()
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+
+	-- Keep the window reachable: if a resize leaves it partly/fully off-screen
+	-- (e.g. it was dragged to an edge then the window shrank), pull it back to
+	-- the centre. Declared here, connected once ShadowHolder exists below.
+	local ClampWindowOnScreen
 
 	-- ── Shadow / main containers ─────────────────────────────────────────────
 	local ShadowHolder = Instance.new("Frame")
@@ -123,6 +137,30 @@ function FluxLib:CreateWindow(opts)
 	ShadowHolder.BackgroundTransparency = 1
 	ShadowHolder.Size                 = UDim2.new(0,560, 0,370)
 	ShadowHolder.Parent               = ScreenGui
+
+	-- Locks the window's shape so a stretched/non-standard resolution can
+	-- never squish it out of proportion — it keeps the 560:370 ratio always.
+	local AspectLock = Instance.new("UIAspectRatioConstraint")
+	AspectLock.AspectRatio  = 560/370
+	AspectLock.DominantAxis = Enum.DominantAxis.Width
+	AspectLock.Parent       = ShadowHolder
+
+	-- Now that ShadowHolder exists, wire the off-screen recovery. If the
+	-- window's centre has drifted outside the viewport after a resize, snap
+	-- it back to the middle so it's never lost.
+	ClampWindowOnScreen = function()
+		local vp  = workspace.CurrentCamera.ViewportSize
+		local pos = ShadowHolder.AbsolutePosition
+		local sz  = ShadowHolder.AbsoluteSize
+		local cx  = pos.X + sz.X/2
+		local cy  = pos.Y + sz.Y/2
+		if cx < 0 or cy < 0 or cx > vp.X or cy > vp.Y then
+			ShadowHolder.Position = UDim2.new(0.5,0,0.5,0)
+		end
+	end
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+		task.defer(ClampWindowOnScreen)
+	end)
 
 	local Shadow = Instance.new("ImageLabel")
 	Shadow.BackgroundTransparency = 1
