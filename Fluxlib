@@ -1470,34 +1470,46 @@ function FluxLib:CreateWindow(opts)
 		table.insert(ConfigApply,  applyFn)
 	end
 
-	-- Splash: a fullscreen overlay with the logo and a line of text that fades
-	-- in, holds briefly, then fades out. Good for mode changes / announcements.
-	--   Win:Splash("FREECAM MODE")
-	--   Win:Splash("FLUX FREECAM OFF", { Hold = 0.4 })
+	-- Splash: a clean fullscreen overlay with the logo and a line of text.
+	-- Solid black cover fades in, logo + text animate, holds, then fades out.
+	-- Optionally plays a sound once it's fully shown.
+	--   Win:Splash("FREECAM MODE", { Sound = "rbxassetid://90420386076500" })
 	function Win:Splash(text, opts)
 		opts = opts or {}
-		local hold = opts.Hold or 0.6
+		local hold     = opts.Hold or 0.7
+		local soundId  = opts.Sound
+		local subtitle = opts.Subtitle
 
 		local Overlay = Instance.new("Frame")
 		Overlay.Size                 = UDim2.new(1,0,1,0)
-		Overlay.BackgroundColor3     = C.BG
+		Overlay.Position             = UDim2.new(0,0,0,0)
+		Overlay.BackgroundColor3     = Color3.fromRGB(0,0,0)
 		Overlay.BackgroundTransparency = 1
 		Overlay.BorderSizePixel      = 0
 		Overlay.ZIndex               = 5000
 		Overlay.Parent               = ScreenGui
 
+		-- play the sound (parented to the overlay so it cleans up with it)
+		local Sound
+		if soundId then
+			Sound = Instance.new("Sound")
+			Sound.SoundId = soundId
+			Sound.Volume  = 1
+			Sound.Parent  = Overlay
+		end
+
 		local Center = Instance.new("Frame")
 		Center.AnchorPoint           = Vector2.new(0.5,0.5)
 		Center.Position              = UDim2.new(0.5,0,0.5,0)
-		Center.Size                  = UDim2.new(0,200,0,140)
+		Center.Size                  = UDim2.new(0,260,0,170)
 		Center.BackgroundTransparency = 1
 		Center.ZIndex                = 5001
 		Center.Parent                = Overlay
 
 		local Logo = Instance.new("ImageLabel")
 		Logo.AnchorPoint             = Vector2.new(0.5,0)
-		Logo.Position                = UDim2.new(0.5,0,0,0)
-		Logo.Size                    = UDim2.new(0,72,0,72)
+		Logo.Position                = UDim2.new(0.5,0,0,18)
+		Logo.Size                    = UDim2.new(0,84,0,84)
 		Logo.BackgroundTransparency  = 1
 		Logo.Image                   = LogoId
 		Logo.ImageTransparency       = 1
@@ -1505,35 +1517,76 @@ function FluxLib:CreateWindow(opts)
 		Logo.ZIndex                  = 5002
 		Logo.Parent                  = Center
 
-		local Label = Instance.new("TextLabel")
-		Label.AnchorPoint            = Vector2.new(0.5,1)
-		Label.Position               = UDim2.new(0.5,0,1,0)
-		Label.Size                   = UDim2.new(1,40,0,28)
-		Label.BackgroundTransparency = 1
-		Label.Text                   = tostring(text or "")
-		Label.TextColor3             = C.Text
-		Label.Font                   = Enum.Font.GothamBold
-		Label.TextSize               = 20
-		Label.TextTransparency       = 1
-		Label.ZIndex                 = 5002
-		Label.Parent                 = Center
+		local Title = Instance.new("TextLabel")
+		Title.AnchorPoint            = Vector2.new(0.5,0)
+		Title.Position               = UDim2.new(0.5,0,0,116)
+		Title.Size                   = UDim2.new(1,60,0,26)
+		Title.BackgroundTransparency = 1
+		Title.Text                   = tostring(text or "")
+		Title.TextColor3             = C.Text
+		Title.Font                   = Enum.Font.GothamBold
+		Title.TextSize               = 22
+		Title.TextTransparency       = 1
+		Title.ZIndex                 = 5002
+		Title.Parent                 = Center
 
-		local inInfo  = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-		local outInfo = TweenInfo.new(0.4,  Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		-- thin accent line under the title for the premium look
+		local Line = Instance.new("Frame")
+		Line.AnchorPoint             = Vector2.new(0.5,0)
+		Line.Position                = UDim2.new(0.5,0,0,148)
+		Line.Size                    = UDim2.new(0,0,0,2)
+		Line.BackgroundColor3        = C.Accent
+		Line.BorderSizePixel         = 0
+		Line.BackgroundTransparency  = 1
+		Line.ZIndex                  = 5002
+		Line.Parent                  = Center
+		MakeCorner(Line, 1)
+		local LineGrad = Instance.new("UIGradient")
+		LineGrad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, C.GradTop),
+			ColorSequenceKeypoint.new(1, C.GradBot),
+		})
+		LineGrad.Parent = Line
 
-		-- fade in
-		TweenService:Create(Overlay, inInfo, {BackgroundTransparency = 0.15}):Play()
-		TweenService:Create(Logo,    inInfo, {ImageTransparency = 0}):Play()
-		TweenService:Create(Label,   inInfo, {TextTransparency = 0}):Play()
-		-- subtle logo rise
-		Logo.Position = UDim2.new(0.5,0,0,12)
-		TweenService:Create(Logo, inInfo, {Position = UDim2.new(0.5,0,0,0)}):Play()
+		local Subtitle
+		if subtitle then
+			Subtitle = Instance.new("TextLabel")
+			Subtitle.AnchorPoint            = Vector2.new(0.5,0)
+			Subtitle.Position               = UDim2.new(0.5,0,0,156)
+			Subtitle.Size                   = UDim2.new(1,40,0,18)
+			Subtitle.BackgroundTransparency = 1
+			Subtitle.Text                   = tostring(subtitle)
+			Subtitle.TextColor3             = C.TextMuted
+			Subtitle.Font                   = Enum.Font.Gotham
+			Subtitle.TextSize               = 13
+			Subtitle.TextTransparency       = 1
+			Subtitle.ZIndex                 = 5002
+			Subtitle.Parent                 = Center
+		end
 
-		task.delay(0.35 + hold, function()
+		local inInfo   = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		local lineInfo = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		local outInfo  = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+
+		-- fade in: solid black cover + logo rise + title + accent line grow
+		TweenService:Create(Overlay, inInfo, {BackgroundTransparency = 0}):Play()
+		TweenService:Create(Logo,    inInfo, {ImageTransparency = 0, Position = UDim2.new(0.5,0,0,8)}):Play()
+		TweenService:Create(Title,   inInfo, {TextTransparency = 0}):Play()
+		TweenService:Create(Line,    lineInfo, {BackgroundTransparency = 0, Size = UDim2.new(0,120,0,2)}):Play()
+		if Subtitle then TweenService:Create(Subtitle, inInfo, {TextTransparency = 0}):Play() end
+
+		-- play sound right as it finishes coming in ("loaded and ready")
+		if Sound then
+			task.delay(0.4, function() pcall(function() Sound:Play() end) end)
+		end
+
+		task.delay(0.4 + hold, function()
 			TweenService:Create(Overlay, outInfo, {BackgroundTransparency = 1}):Play()
 			TweenService:Create(Logo,    outInfo, {ImageTransparency = 1}):Play()
-			TweenService:Create(Label,   outInfo, {TextTransparency = 1}):Play()
-			task.delay(0.42, function() pcall(function() Overlay:Destroy() end) end)
+			TweenService:Create(Title,   outInfo, {TextTransparency = 1}):Play()
+			TweenService:Create(Line,    outInfo, {BackgroundTransparency = 1}):Play()
+			if Subtitle then TweenService:Create(Subtitle, outInfo, {TextTransparency = 1}):Play() end
+			task.delay(0.5, function() pcall(function() Overlay:Destroy() end) end)
 		end)
 	end
 
