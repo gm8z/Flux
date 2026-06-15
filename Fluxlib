@@ -1399,31 +1399,99 @@ function FluxLib:CreateWindow(opts)
 		end)
 	end
 
-	-- ── Dragging (PC + Mobile, matches fixed version from previous session) ───
+	-- ── Dragging with edge/corner snapping (PC + Mobile, resolution-agnostic) ─
+	-- During the drag the window is clamped so it can never leave the screen.
+	-- On release it smoothly tweens to the nearest edge or corner (within a
+	-- threshold) leaving a small margin, otherwise it just settles in place.
 	local Dragging=false
 	local DragStart=Vector3.new()
 	local StartPos=ShadowHolder.Position
 	local TargetPosition=ShadowHolder.Position
 	local dMC,dEC,dRC
 
+	local SNAP_MARGIN    = 12   -- gap left between window and screen edge
+	local SNAP_THRESHOLD = 90   -- how close (px) an edge must be to snap to it
+
+	-- Clamp an offset-based position so the window stays fully on screen.
+	-- Works in absolute pixels, so it's correct on any resolution incl. stretched.
+	local function clampToScreen(offsetX, offsetY)
+		local vp = workspace.CurrentCamera.ViewportSize
+		local sz = ShadowHolder.AbsoluteSize          -- already scaled
+		local half = sz/2                              -- anchor is 0.5,0.5
+		local minX, maxX = half.X, vp.X - half.X
+		local minY, maxY = half.Y, vp.Y - half.Y
+		-- If the window is bigger than the screen on an axis, just centre it
+		local cx = (minX <= maxX) and math.clamp(offsetX, minX, maxX) or vp.X/2
+		local cy = (minY <= maxY) and math.clamp(offsetY, minY, maxY) or vp.Y/2
+		return cx, cy
+	end
+
 	local function StopMainDrag()
 		Dragging=false
 		if dMC then dMC:Disconnect() dMC=nil end
 		if dEC then dEC:Disconnect() dEC=nil end
 		if dRC then dRC:Disconnect() dRC=nil end
+
+		-- Work out where the window centre currently is in absolute pixels
+		local sz   = ShadowHolder.AbsoluteSize
+		local half = sz/2
+		local cx   = ShadowHolder.AbsolutePosition.X + half.X
+		local cy   = ShadowHolder.AbsolutePosition.Y + half.Y
+		local vp   = workspace.CurrentCamera.ViewportSize
+
+		-- Distance from each edge (centre to that edge, accounting for size)
+		local distLeft   = cx - half.X
+		local distRight  = vp.X - (cx + half.X)
+		local distTop    = cy - half.Y
+		local distBottom = vp.Y - (cy + half.Y)
+
+		local snapX, snapY = cx, cy
+		-- Horizontal snap
+		if distLeft <= SNAP_THRESHOLD and distLeft <= distRight then
+			snapX = half.X + SNAP_MARGIN
+		elseif distRight <= SNAP_THRESHOLD then
+			snapX = vp.X - half.X - SNAP_MARGIN
+		end
+		-- Vertical snap
+		if distTop <= SNAP_THRESHOLD and distTop <= distBottom then
+			snapY = half.Y + SNAP_MARGIN
+		elseif distBottom <= SNAP_THRESHOLD then
+			snapY = vp.Y - half.Y - SNAP_MARGIN
+		end
+
+		-- Final safety clamp, then smooth tween into place
+		snapX, snapY = clampToScreen(snapX, snapY)
+		local goal = UDim2.new(0, snapX, 0, snapY)
+		TweenService:Create(ShadowHolder,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{Position = goal}):Play()
+		TargetPosition = goal
 	end
+
 	local function StartMainDrag(inputPos)
 		if dMC then dMC:Disconnect() dMC=nil end
 		if dEC then dEC:Disconnect() dEC=nil end
 		if dRC then dRC:Disconnect() dRC=nil end
 		Dragging=true DragStart=inputPos
-		StartPos=ShadowHolder.Position          -- read actual current position
+		StartPos=ShadowHolder.Position
 		TargetPosition=ShadowHolder.Position
 		dMC=UserInputService.InputChanged:Connect(function(i)
 			if not Dragging then return end
 			if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then
 				local d=i.Position-DragStart
-				TargetPosition=UDim2.new(StartPos.X.Scale,StartPos.X.Offset+d.X,StartPos.Y.Scale,StartPos.Y.Offset+d.Y)
+				-- Convert the intended position to absolute pixels and clamp it
+				-- so the window can never be dragged off the screen.
+				local sz   = ShadowHolder.AbsoluteSize
+				local cx   = StartPos.X.Offset + d.X
+				local cy   = StartPos.Y.Offset + d.Y
+				-- StartPos may be scale-based (0.5,0.5) on first drag; resolve to px
+				if StartPos.X.Scale ~= 0 or StartPos.Y.Scale ~= 0 then
+					local vp = workspace.CurrentCamera.ViewportSize
+					cx = StartPos.X.Scale*vp.X + StartPos.X.Offset + d.X
+					cy = StartPos.Y.Scale*vp.Y + StartPos.Y.Offset + d.Y
+				end
+				cx, cy = clampToScreen(cx, cy)
+				TargetPosition=UDim2.new(0, cx, 0, cy)
 			end
 		end)
 		dEC=UserInputService.InputEnded:Connect(function(i)
@@ -1432,7 +1500,7 @@ function FluxLib:CreateWindow(opts)
 			end
 		end)
 		dRC=RunService.RenderStepped:Connect(function()
-			if not Dragging then StopMainDrag() return end
+			if not Dragging then return end
 			if not ShadowHolder or not ShadowHolder.Parent then StopMainDrag() return end
 			ShadowHolder.Position=ShadowHolder.Position:Lerp(TargetPosition, DragSpeed)
 		end)
