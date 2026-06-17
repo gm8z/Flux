@@ -126,13 +126,8 @@ function FluxLib:CreateWindow(opts)
 	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
 
 	-- Keep the window reachable: if a resize leaves it partly/fully off-screen
-	-- (e.g. it was dragged to an edge then the window shrank), pull it back to
-	-- the centre. Declared here, connected once ShadowHolder exists below.
+	-- (e.g. it was dragged to an edge then the window shrank), pull it back on.
 	local ClampWindowOnScreen
-
-	-- Snap behaviour (shared by the drag release and the resize handler)
-	local SNAP_MARGIN    = 12   -- gap left between window and screen edge
-	local SNAP_THRESHOLD = 40   -- only snap when the edge is within this many px
 
 	-- ── Shadow / main containers ─────────────────────────────────────────────
 	local ShadowHolder = Instance.new("Frame")
@@ -150,28 +145,17 @@ function FluxLib:CreateWindow(opts)
 	AspectLock.Parent       = ShadowHolder
 
 	-- Now that ShadowHolder exists, wire the off-screen recovery. After a
-	-- resize, re-clamp the window fully on-screen and, if it was resting
-	-- against an edge, keep it glued to that edge so it tracks the new size.
+	-- resize, clamp the window's centre so it always stays fully on screen.
 	ClampWindowOnScreen = function()
 		local vp   = workspace.CurrentCamera.ViewportSize
 		local sz   = ShadowHolder.AbsoluteSize
 		local half = sz/2
 		local cx   = ShadowHolder.AbsolutePosition.X + half.X
 		local cy   = ShadowHolder.AbsolutePosition.Y + half.Y
-
-		-- Was it sitting at an edge (within margin+a little)? If so, re-pin it.
-		local edge = SNAP_MARGIN + 4
-		if cx - half.X <= edge then            cx = half.X + SNAP_MARGIN
-		elseif vp.X - (cx + half.X) <= edge then cx = vp.X - half.X - SNAP_MARGIN end
-		if cy - half.Y <= edge then            cy = half.Y + SNAP_MARGIN
-		elseif vp.Y - (cy + half.Y) <= edge then cy = vp.Y - half.Y - SNAP_MARGIN end
-
-		-- Final on-screen clamp
 		local minX, maxX = half.X, vp.X - half.X
 		local minY, maxY = half.Y, vp.Y - half.Y
 		cx = (minX <= maxX) and math.clamp(cx, minX, maxX) or vp.X/2
 		cy = (minY <= maxY) and math.clamp(cy, minY, maxY) or vp.Y/2
-
 		ShadowHolder.Position = UDim2.new(0, cx, 0, cy)
 	end
 	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
@@ -410,6 +394,24 @@ function FluxLib:CreateWindow(opts)
 			if v.Icon       then T(v.Icon, 0.15, {ImageColor3 = sel and C.Accent or C.TextMuted}) end
 		end
 		CurrentTab = td
+
+		-- Clean pop-in animation when a page becomes visible: its contents
+		-- ease up from a tiny offset and scale from slightly small to full.
+		local page = td.Page
+		if page then
+			-- reuse a dedicated UIScale on the page (created once)
+			local popScale = page:FindFirstChild("__PopScale")
+			if not popScale then
+				popScale = Instance.new("UIScale")
+				popScale.Name = "__PopScale"
+				popScale.Parent = page
+			end
+			page.CanvasPosition = Vector2.new(0, 0)
+			popScale.Scale = 0.97
+			TweenService:Create(popScale,
+				TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+				{Scale = 1}):Play()
+		end
 	end
 
 	-- ── Status bar (lazy-built) ──────────────────────────────────────────────
@@ -1428,7 +1430,6 @@ function FluxLib:CreateWindow(opts)
 	local TargetPosition=ShadowHolder.Position
 	local dMC,dEC,dRC
 
-	-- (SNAP_MARGIN / SNAP_THRESHOLD declared earlier, shared with resize handler)
 
 	-- Clamp an offset-based position so the window stays fully on screen.
 	-- Works in absolute pixels, so it's correct on any resolution incl. stretched.
@@ -1449,54 +1450,14 @@ function FluxLib:CreateWindow(opts)
 		if dMC then dMC:Disconnect() dMC=nil end
 		if dEC then dEC:Disconnect() dEC=nil end
 		if dRC then dRC:Disconnect() dRC=nil end
-
-		-- Work out where the window centre currently is in absolute pixels
+		-- No snapping: leave the window exactly where it was dropped.
 		local sz   = ShadowHolder.AbsoluteSize
 		local half = sz/2
 		local cx   = ShadowHolder.AbsolutePosition.X + half.X
 		local cy   = ShadowHolder.AbsolutePosition.Y + half.Y
-		local vp   = workspace.CurrentCamera.ViewportSize
-
-		-- Distance from each edge (centre to that edge, accounting for size)
-		local distLeft   = cx - half.X
-		local distRight  = vp.X - (cx + half.X)
-		local distTop    = cy - half.Y
-		local distBottom = vp.Y - (cy + half.Y)
-
-		local snapX, snapY = cx, cy
-		local didSnap = false
-		-- Horizontal snap
-		if distLeft <= SNAP_THRESHOLD and distLeft <= distRight then
-			snapX = half.X + SNAP_MARGIN
-			didSnap = true
-		elseif distRight <= SNAP_THRESHOLD then
-			snapX = vp.X - half.X - SNAP_MARGIN
-			didSnap = true
-		end
-		-- Vertical snap
-		if distTop <= SNAP_THRESHOLD and distTop <= distBottom then
-			snapY = half.Y + SNAP_MARGIN
-			didSnap = true
-		elseif distBottom <= SNAP_THRESHOLD then
-			snapY = vp.Y - half.Y - SNAP_MARGIN
-			didSnap = true
-		end
-
-		if not didSnap then
-			-- Not near any edge: leave it exactly where it was dropped.
-			-- Pin the current pixel position so nothing re-animates it.
-			TargetPosition = UDim2.new(0, cx, 0, cy)
-			ShadowHolder.Position = TargetPosition
-			return
-		end
-
-		-- An edge was close — smooth tween flush against it
-		snapX, snapY = clampToScreen(snapX, snapY)
-		local goal = UDim2.new(0, snapX, 0, snapY)
-		TweenService:Create(ShadowHolder,
-			TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-			{Position = goal}):Play()
-		TargetPosition = goal
+		cx, cy = clampToScreen(cx, cy)
+		TargetPosition = UDim2.new(0, cx, 0, cy)
+		ShadowHolder.Position = TargetPosition
 	end
 
 	local function StartMainDrag(inputPos)
