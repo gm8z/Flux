@@ -37,41 +37,43 @@ local function T(obj, t, props)
 end
 
 -- Smooth scrolling for a ScrollingFrame: intercepts mouse-wheel input and
--- eases CanvasPosition toward a target instead of jumping in hard steps.
--- Touch scrolling keeps Roblox's native inertia. Safe on every resolution.
+-- glides CanvasPosition toward a target with gentle easing instead of the
+-- default hard jump. Touch scrolling keeps Roblox's native inertia.
 local function MakeSmoothScroll(frame, step)
-	step = step or 90
-	local target = frame.CanvasPosition
-	local active = false
+	step = step or 110
+	local target  = frame.CanvasPosition
+	local running = false
 
 	frame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-		-- if something else moved the canvas (touch drag, jump to top), resync
-		if not active then target = frame.CanvasPosition end
+		-- if the canvas moved by something other than our easing (touch drag,
+		-- jump-to-top on tab open), resync the target so we don't fight it
+		if not running then target = frame.CanvasPosition end
 	end)
 
 	frame.InputChanged:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseWheel then
-			local max = frame.AbsoluteCanvasSize.Y - frame.AbsoluteWindowSize.Y
-			if max <= 0 then return end
-			target = Vector2.new(
-				target.X,
-				math.clamp(target.Y - input.Position.Z * step, 0, max)
-			)
-			if not active then
-				active = true
-				local conn
-				conn = RunService.RenderStepped:Connect(function()
-					if not frame or not frame.Parent then conn:Disconnect() active=false return end
+		if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+		local max = frame.AbsoluteCanvasSize.Y - frame.AbsoluteWindowSize.Y
+		if max <= 0 then return end
+
+		target = Vector2.new(target.X, math.clamp(target.Y - input.Position.Z * step, 0, max))
+
+		if not running then
+			running = true
+			task.spawn(function()
+				while running do
 					local cur = frame.CanvasPosition
-					local newY = cur.Y + (target.Y - cur.Y) * 0.2
+					-- gentle easing — small factor = very smooth glide
+					local newY = cur.Y + (target.Y - cur.Y) * 0.12
 					if math.abs(target.Y - newY) < 0.5 then
-						newY = target.Y
-						conn:Disconnect()
-						active = false
+						frame.CanvasPosition = Vector2.new(target.X, target.Y)
+						running = false
+						break
 					end
 					frame.CanvasPosition = Vector2.new(target.X, newY)
-				end)
-			end
+					RunService.RenderStepped:Wait()
+					if not frame or not frame.Parent then running = false break end
+				end
+			end)
 		end
 	end)
 end
@@ -1506,7 +1508,6 @@ function FluxLib:CreateWindow(opts)
 				local d=i.Position-DragStart
 				-- Convert the intended position to absolute pixels and clamp it
 				-- so the window can never be dragged off the screen.
-				local sz   = ShadowHolder.AbsoluteSize
 				local cx   = StartPos.X.Offset + d.X
 				local cy   = StartPos.Y.Offset + d.Y
 				-- StartPos may be scale-based (0.5,0.5) on first drag; resolve to px
@@ -1516,20 +1517,15 @@ function FluxLib:CreateWindow(opts)
 					cy = StartPos.Y.Scale*vp.Y + StartPos.Y.Offset + d.Y
 				end
 				cx, cy = clampToScreen(cx, cy)
-				TargetPosition=UDim2.new(0, cx, 0, cy)
+				-- Set the window directly under the cursor — no easing, so there
+				-- is zero drift or snap-back when you move or release.
+				ShadowHolder.Position = UDim2.new(0, cx, 0, cy)
 			end
 		end)
 		dEC=UserInputService.InputEnded:Connect(function(i)
 			if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
 				StopMainDrag()
 			end
-		end)
-		dRC=RunService.RenderStepped:Connect(function()
-			if not Dragging then return end
-			if not ShadowHolder or not ShadowHolder.Parent then StopMainDrag() return end
-			-- Tight follow: high lerp factor so the window stays under the cursor
-			-- with no lag, which means no drift/glide after you release.
-			ShadowHolder.Position=ShadowHolder.Position:Lerp(TargetPosition, 0.45)
 		end)
 	end
 	ContentTopBar.InputBegan:Connect(function(i)
