@@ -36,6 +36,46 @@ local function T(obj, t, props)
 	TweenService:Create(obj, TweenInfo.new(t, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props):Play()
 end
 
+-- Smooth scrolling for a ScrollingFrame: intercepts mouse-wheel input and
+-- eases CanvasPosition toward a target instead of jumping in hard steps.
+-- Touch scrolling keeps Roblox's native inertia. Safe on every resolution.
+local function MakeSmoothScroll(frame, step)
+	step = step or 90
+	local target = frame.CanvasPosition
+	local active = false
+
+	frame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		-- if something else moved the canvas (touch drag, jump to top), resync
+		if not active then target = frame.CanvasPosition end
+	end)
+
+	frame.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			local max = frame.AbsoluteCanvasSize.Y - frame.AbsoluteWindowSize.Y
+			if max <= 0 then return end
+			target = Vector2.new(
+				target.X,
+				math.clamp(target.Y - input.Position.Z * step, 0, max)
+			)
+			if not active then
+				active = true
+				local conn
+				conn = RunService.RenderStepped:Connect(function()
+					if not frame or not frame.Parent then conn:Disconnect() active=false return end
+					local cur = frame.CanvasPosition
+					local newY = cur.Y + (target.Y - cur.Y) * 0.2
+					if math.abs(target.Y - newY) < 0.5 then
+						newY = target.Y
+						conn:Disconnect()
+						active = false
+					end
+					frame.CanvasPosition = Vector2.new(target.X, newY)
+				end)
+			end
+		end
+	end)
+end
+
 -- ─── safe file ops ───────────────────────────────────────────────────────────
 local function SafeIsfolder(p)    local ok,r=pcall(function() return isfolder and isfolder(p) end) return ok and r==true end
 local function SafeMakefolder(p)  pcall(function() if makefolder then makefolder(p) end end) end
@@ -247,6 +287,7 @@ function FluxLib:CreateWindow(opts)
 	SidebarScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	SidebarScroll.ScrollingEnabled  = true
 	SidebarScroll.Parent            = Sidebar
+	MakeSmoothScroll(SidebarScroll, 60)
 
 	local SP = Instance.new("UIPadding")
 	SP.PaddingLeft=UDim.new(0,5) SP.PaddingRight=UDim.new(0,5)
@@ -395,22 +436,15 @@ function FluxLib:CreateWindow(opts)
 		end
 		CurrentTab = td
 
-		-- Clean pop-in animation when a page becomes visible: its contents
-		-- ease up from a tiny offset and scale from slightly small to full.
+		-- Clean pop-in: the page slides up from slightly below into place.
 		local page = td.Page
 		if page then
-			-- reuse a dedicated UIScale on the page (created once)
-			local popScale = page:FindFirstChild("__PopScale")
-			if not popScale then
-				popScale = Instance.new("UIScale")
-				popScale.Name = "__PopScale"
-				popScale.Parent = page
-			end
 			page.CanvasPosition = Vector2.new(0, 0)
-			popScale.Scale = 0.97
-			TweenService:Create(popScale,
-				TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{Scale = 1}):Play()
+			-- start a touch lower, then ease up to the resting position (0)
+			page.Position = UDim2.new(0, 0, 0, 28)
+			TweenService:Create(page,
+				TweenInfo.new(0.34, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+				{Position = UDim2.new(0, 0, 0, 0)}):Play()
 		end
 	end
 
@@ -1205,6 +1239,7 @@ function FluxLib:CreateWindow(opts)
 	SettingsPage.AutomaticCanvasSize=Enum.AutomaticSize.Y
 	SettingsPage.ScrollBarImageColor3=C.Accent SettingsPage.Visible=false
 	SettingsPage.BorderSizePixel=0 SettingsPage.Parent=PagesFolder
+	MakeSmoothScroll(SettingsPage, 90)
 	local SettPad=Instance.new("UIPadding") SettPad.PaddingBottom=UDim.new(0,16) SettPad.Parent=SettingsPage
 	local SPL=Instance.new("UIListLayout") SPL.Padding=UDim.new(0,14)
 	SPL.SortOrder=Enum.SortOrder.LayoutOrder SPL.Parent=SettingsPage
@@ -1420,10 +1455,8 @@ function FluxLib:CreateWindow(opts)
 		end)
 	end
 
-	-- ── Dragging with edge/corner snapping (PC + Mobile, resolution-agnostic) ─
-	-- During the drag the window is clamped so it can never leave the screen.
-	-- On release it smoothly tweens to the nearest edge or corner (within a
-	-- threshold) leaving a small margin, otherwise it just settles in place.
+	-- ── Dragging (PC + Mobile, resolution-agnostic, no snapping) ─────────────
+	-- The window follows the cursor tightly and is clamped fully on-screen.
 	local Dragging=false
 	local DragStart=Vector3.new()
 	local StartPos=ShadowHolder.Position
@@ -1494,7 +1527,9 @@ function FluxLib:CreateWindow(opts)
 		dRC=RunService.RenderStepped:Connect(function()
 			if not Dragging then return end
 			if not ShadowHolder or not ShadowHolder.Parent then StopMainDrag() return end
-			ShadowHolder.Position=ShadowHolder.Position:Lerp(TargetPosition, DragSpeed)
+			-- Tight follow: high lerp factor so the window stays under the cursor
+			-- with no lag, which means no drift/glide after you release.
+			ShadowHolder.Position=ShadowHolder.Position:Lerp(TargetPosition, 0.45)
 		end)
 	end
 	ContentTopBar.InputBegan:Connect(function(i)
@@ -1531,6 +1566,7 @@ function FluxLib:CreateWindow(opts)
 		Page.AutomaticCanvasSize=Enum.AutomaticSize.Y
 		Page.ScrollBarThickness=IsMobile and 0 or 2 Page.ScrollBarImageColor3=C.Accent
 		Page.Visible=false Page.BorderSizePixel=0 Page.Parent=PagesFolder
+		MakeSmoothScroll(Page, 90)
 		local PPad=Instance.new("UIPadding") PPad.PaddingBottom=UDim.new(0,16) PPad.Parent=Page
 		local PL=Instance.new("UIListLayout") PL.Padding=UDim.new(0,14) PL.Parent=Page
 		PL:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
